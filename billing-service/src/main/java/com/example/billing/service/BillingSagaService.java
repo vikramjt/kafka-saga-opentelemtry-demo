@@ -6,6 +6,8 @@ import com.example.contracts.events.BillingChargeRequestedEvent;
 import com.example.contracts.events.BillingChargedEvent;
 import com.example.contracts.events.BillingRejectedEvent;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
@@ -13,6 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class BillingSagaService {
+
+    private static final Logger log = LoggerFactory.getLogger(BillingSagaService.class);
 
     private final BillingTransactionRepository repository;
     private final KafkaTemplate<String, Object> kafkaTemplate;
@@ -25,6 +29,7 @@ public class BillingSagaService {
     @KafkaListener(topics = "billing.commands.charge", groupId = "billing-service")
     @Transactional
     public void charge(BillingChargeRequestedEvent event) {
+        log.info("Consumed BillingChargeRequestedEvent from topic=billing.commands.charge, sagaId={}", event.sagaId());
         BillingTransactionEntity transaction = new BillingTransactionEntity();
         transaction.setSagaId(event.sagaId());
         transaction.setCustomerId(event.customerId());
@@ -34,6 +39,7 @@ public class BillingSagaService {
             transaction.setStatus("FAILED");
             transaction.setMessage("Billing declined by billing service validation");
             repository.save(transaction);
+            log.info("Publishing BillingRejectedEvent to topic=billing.events.rejected, sagaId={}", event.sagaId());
             kafkaTemplate.send(
                     "billing.events.rejected",
                     event.sagaId(),
@@ -46,6 +52,7 @@ public class BillingSagaService {
         transaction.setMessage("Billing processed: " + billingReference);
         repository.save(transaction);
 
+        log.info("Publishing BillingChargedEvent to topic=billing.events.charged, sagaId={}", event.sagaId());
         kafkaTemplate.send(
                 "billing.events.charged",
                 event.sagaId(),
